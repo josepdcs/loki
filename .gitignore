@@ -55,3 +55,4 @@ nix/result
 
 # snyk
 .dccache
+/.run/

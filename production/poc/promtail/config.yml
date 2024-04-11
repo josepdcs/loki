@@ -6,7 +6,7 @@ positions:
   filename: /tmp/positions.yaml
 
 clients:
-  - url: http://localhost:3101/loki/api/v1/push
+  - url: http://loki:3100/loki/api/v1/push
 
 scrape_configs:
 - job_name: system
@@ -14,6 +14,6 @@ scrape_configs:
   - targets:
       - localhost
     labels:
-      type: external
+      type: internal
       job: varlogs
       __path__: /var/log/*log
