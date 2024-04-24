@@ -1365,7 +1365,7 @@ func adjustQueryStartTime(maxLookBackPeriod time.Duration, start, now time.Time)
 	return start
 }
 
-func (i *Ingester) GetDetectedFields(_ context.Context, _ *logproto.DetectedFieldsRequest) (*logproto.DetectedFieldsResponse, error) {
+func (i *Ingester) GetDetectedFields(_ context.Context, r *logproto.DetectedFieldsRequest) (*logproto.DetectedFieldsResponse, error) {
 	return &logproto.DetectedFieldsResponse{
 		Fields: []*logproto.DetectedField{
 			{
@@ -1374,6 +1374,7 @@ func (i *Ingester) GetDetectedFields(_ context.Context, _ *logproto.DetectedFiel
 				Cardinality: 1,
 			},
 		},
+		FieldLimit: r.GetFieldLimit(),
 	}, nil
 }
 
@@ -1394,7 +1395,6 @@ func (i *Ingester) GetDetectedLabels(ctx context.Context, req *logproto.Detected
 		if err != nil {
 			return nil, err
 		}
-		level.Info(i.logger).Log("msg", matchers)
 	}
 
 	labelMap, err := instance.LabelsWithValues(ctx, *req.Start, matchers...)

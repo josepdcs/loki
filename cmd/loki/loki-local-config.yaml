@@ -41,13 +41,14 @@ querier:
 ruler:
   alertmanager_url: http://localhost:9093
 
-
 limits_config:
   max_query_parallelism: 32
   tsdb_max_query_parallelism: 128
   tsdb_max_bytes_per_shard: 1GB
   tsdb_sharding_strategy: power_of_two
 
+frontend:
+  encoding: protobuf
 
 # By default, Loki will send anonymous, but uniquely-identifiable usage and configuration
 # analytics to Grafana Labs. These statistics are sent to https://stats.grafana.org/
