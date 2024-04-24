@@ -23,6 +23,7 @@ type ShardVersion uint8
 const (
 	PowerOfTwoVersion ShardVersion = iota
 	BoundedVersion
+	LogxyVersion
 )
 
 func (v ShardVersion) Strategy(resolver ShardResolver, defaultTargetShardBytes uint64) ShardingStrategy {
@@ -68,7 +69,9 @@ type ShardResolver interface {
 
 type ConstantShards int
 
-func (s ConstantShards) Shards(_ syntax.Expr) (int, uint64, error) { return int(s), 0, nil }
+func (s ConstantShards) Shards(_ syntax.Expr) (int, uint64, error) {
+	return int(s), 0, nil
+}
 func (s ConstantShards) ShardingRanges(_ syntax.Expr, _ uint64) ([]logproto.Shard, error) {
 	return sharding.LinearShards(int(s), 0), nil
 }

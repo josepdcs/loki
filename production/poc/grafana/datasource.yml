@@ -7,8 +7,16 @@ datasources:
     isDefault: false
     access: proxy
     editable: true
-    basicAuth: true
-    basicAuthUser: 113757
+    basicAuth: false
+  - name: "Logxy DES"
+    type: loki
+    url: https://des-logxy-swobservb-global.apps.axdesecocp1.ecommerce.inditex.grp/logxy
+    isDefault: false
+    access: proxy
+    editable: true
+    basicAuth: false
+    jsonData:
+      tlsSkipVerify: true
   - name: "Loki Local Internal"
     type: loki
     url: http://loki:3100

@@ -2,6 +2,7 @@ package logql
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -262,19 +263,30 @@ func (q *query) Exec(ctx context.Context) (logqlmodel.Result, error) {
 		RecordRangeAndInstantQueryMetrics(ctx, q.logger, q.params, strconv.Itoa(status), statResult, data)
 	}
 
-	return logqlmodel.Result{
+	r := logqlmodel.Result{
 		Data:       data,
 		Statistics: statResult,
 		Headers:    metadataCtx.Headers(),
 		Warnings:   metadataCtx.Warnings(),
-	}, err
+	}
+
+	b, err := json.Marshal(r)
+	if err != nil {
+		fmt.Println("error marshalling result", err)
+	}
+	fmt.Println()
+	fmt.Println()
+	fmt.Println("result", string(b))
+	fmt.Println()
+
+	return r, err
 }
 
 func (q *query) Eval(ctx context.Context) (promql_parser.Value, error) {
 	tenants, _ := tenant.TenantIDs(ctx)
-	timeoutCapture := func(id string) time.Duration { return q.limits.QueryTimeout(ctx, id) }
-	queryTimeout := validation.SmallestPositiveNonZeroDurationPerTenant(tenants, timeoutCapture)
-	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
+	//timeoutCapture := func(id string) time.Duration { return q.limits.QueryTimeout(ctx, id) }
+	//queryTimeout := validation.SmallestPositiveNonZeroDurationPerTenant(tenants, timeoutCapture)
+	ctx, cancel := context.WithTimeout(ctx, time.Minute*60)
 	defer cancel()
 
 	if q.checkBlocked(ctx, tenants) {
@@ -440,6 +452,15 @@ func (q *query) JoinSampleVector(next bool, ts int64, r StepResult, stepEvaluato
 	}
 	result := promql.Matrix(series)
 	sort.Sort(result)
+
+	b, err := json.Marshal(result)
+	if err != nil {
+		fmt.Println("error marshalling result", err)
+	}
+	fmt.Println()
+	fmt.Println()
+	fmt.Println("Matrix result", string(b))
+	fmt.Println()
 
 	return result, stepEvaluator.Error()
 }
