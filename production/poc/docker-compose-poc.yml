@@ -1,0 +1,62 @@
+version: "3"
+
+networks:
+  loki:
+
+services:
+  loki-1:
+    image: grafana/loki:2.9.2
+    volumes:
+      - ./loki/config-loki-1.yml:/etc/loki/local-config.yaml
+    ports:
+      - "3100:3100"
+      - "9096:9096"
+    command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - loki
+
+  loki-2:
+    image: grafana/loki:2.9.2
+    volumes:
+      - ./loki/config-loki-2.yml:/etc/loki/local-config.yaml
+    ports:
+      - "3200:3200"
+      - "9098:9098"
+    command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - loki
+
+  promtail-1:
+    image: grafana/promtail:2.9.2
+    volumes:
+      - /var/log:/var/log
+      - ./promtail/config-loki-1.yml:/etc/promtail/config.yml
+    command: -config.file=/etc/promtail/config.yml
+    networks:
+      - loki
+
+  promtail-2:
+    image: grafana/promtail:2.9.2
+    volumes:
+      - /var/log:/var/log
+      - ./promtail/config-loki-2.yml:/etc/promtail/config.yml
+    command: -config.file=/etc/promtail/config.yml
+    networks:
+      - loki
+
+  grafana:
+    image: grafana/grafana
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=grafana
+    volumes:
+      - ./grafana:/etc/grafana/provisioning/datasources
+      - ./grafana/grafana.ini:/etc/grafana/grafana.ini
+    networks:
+      - loki

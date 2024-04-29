@@ -1,48 +1,27 @@
-target: logxy
 auth_enabled: false
+
 server:
-  http_listen_port: 3101
-  grpc_listen_port: 9097
-
-
-tracing:
-  enabled: true
+  http_listen_port: 3100
+  grpc_listen_port: 9096
 
 common:
   instance_addr: 127.0.0.1
-  path_prefix: /tmp/logxy
+  path_prefix: /tmp/loki
   storage:
     filesystem:
-      chunks_directory: /tmp/logxy/chunks
-      rules_directory: /tmp/logxy/rules
+      chunks_directory: /tmp/loki/chunks
+      rules_directory: /tmp/loki/rules
   replication_factor: 1
   ring:
     kvstore:
       store: inmemory
-  compactor_address: "http://localhost:3101"
 
 query_range:
-  parallelise_shardable_queries: true # Needed for logxy
   results_cache:
     cache:
       embedded_cache:
         enabled: true
         max_size_mb: 100
-
-logxy:
-  sharding_failback_strategy: logs_as_metrics # logs_as_metrics | backend_with_most_data
-  downstream_servers:
-    - name: loki1
-      url: "http://localhost:3100"
-      max_bytes: 600MB
-    - name: loki2
-      url: "http://localhost:3200"
-      max_bytes: 600MB
-
-
-querier:
-  engine:
-    max_look_back_period: 1h
 
 schema_config:
   configs:
@@ -53,12 +32,6 @@ schema_config:
       index:
         prefix: index_
         period: 24h
-
-# limits_config:
-#   tsdb_sharding_strategy: server_group
-
-frontend:
-  downstream_url: "http://localhost:3100"
 
 ruler:
   alertmanager_url: http://localhost:9093

@@ -23,9 +23,21 @@ datasources:
     isDefault: false
     access: proxy
     editable: true
-  - name: "Loki Local External"
+  - name: "Loki Local External (logxy layer)"
     type: loki
     url: http://host.docker.internal:3101
+    isDefault: false
+    access: proxy
+    editable: true
+  - name: "Loki 1"
+    type: loki
+    url: http://loki-1:3100
+    isDefault: false
+    access: proxy
+    editable: true
+  - name: "Loki 2"
+    type: loki
+    url: http://loki-2:3200
     isDefault: false
     access: proxy
     editable: true
