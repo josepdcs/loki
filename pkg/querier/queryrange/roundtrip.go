@@ -137,6 +137,7 @@ func NewMiddleware(
 	retentionEnabled bool,
 	registerer prometheus.Registerer,
 	metricsNamespace string,
+	logxy LogxyInterface,
 ) (base.Middleware, Stopper, error) {
 	metrics := NewMetrics(registerer, metricsNamespace)
 
@@ -201,19 +202,19 @@ func NewMiddleware(
 	}
 
 	metricsTripperware, err := NewMetricTripperware(cfg, engineOpts, log, limits, schema, codec, iqo, resultsCache,
-		cacheGenNumLoader, retentionEnabled, PrometheusExtractor{}, metrics, indexStatsTripperware, metricsNamespace)
+		cacheGenNumLoader, retentionEnabled, PrometheusExtractor{}, metrics, indexStatsTripperware, metricsNamespace, logxy)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	limitedTripperware, err := NewLimitedTripperware(cfg, engineOpts, log, limits, schema, metrics, indexStatsTripperware, codec, iqo)
+	limitedTripperware, err := NewLimitedTripperware(cfg, engineOpts, log, limits, schema, metrics, indexStatsTripperware, codec, iqo, logxy)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	// NOTE: When we would start caching response from non-metric queries we would have to consider cache gen headers as well in
 	// MergeResponse implementation for Loki codecs same as it is done in Cortex at https://github.com/cortexproject/cortex/blob/21bad57b346c730d684d6d0205efef133422ab28/pkg/querier/queryrange/query_range.go#L170
-	logFilterTripperware, err := NewLogFilterTripperware(cfg, engineOpts, log, limits, schema, codec, iqo, resultsCache, metrics, indexStatsTripperware, metricsNamespace)
+	logFilterTripperware, err := NewLogFilterTripperware(cfg, engineOpts, log, limits, schema, codec, iqo, resultsCache, metrics, indexStatsTripperware, metricsNamespace, logxy)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -228,7 +229,7 @@ func NewMiddleware(
 		return nil, nil, err
 	}
 
-	instantMetricTripperware, err := NewInstantMetricTripperware(cfg, engineOpts, log, limits, schema, metrics, codec, instantMetricCache, cacheGenNumLoader, retentionEnabled, indexStatsTripperware, metricsNamespace)
+	instantMetricTripperware, err := NewInstantMetricTripperware(cfg, engineOpts, log, limits, schema, metrics, codec, instantMetricCache, cacheGenNumLoader, retentionEnabled, indexStatsTripperware, metricsNamespace, logxy)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -511,7 +512,7 @@ func getOperation(path string) string {
 }
 
 // NewLogFilterTripperware creates a new frontend tripperware responsible for handling log requests.
-func NewLogFilterTripperware(cfg Config, engineOpts logql.EngineOpts, log log.Logger, limits Limits, schema config.SchemaConfig, merger base.Merger, iqo util.IngesterQueryOptions, c cache.Cache, metrics *Metrics, indexStatsTripperware base.Middleware, metricsNamespace string) (base.Middleware, error) {
+func NewLogFilterTripperware(cfg Config, engineOpts logql.EngineOpts, log log.Logger, limits Limits, schema config.SchemaConfig, merger base.Merger, iqo util.IngesterQueryOptions, c cache.Cache, metrics *Metrics, indexStatsTripperware base.Middleware, metricsNamespace string, logxy LogxyInterface) (base.Middleware, error) {
 	return base.MiddlewareFunc(func(next base.Handler) base.Handler {
 		statsHandler := indexStatsTripperware.Wrap(next)
 
@@ -542,7 +543,21 @@ func NewLogFilterTripperware(cfg Config, engineOpts logql.EngineOpts, log log.Lo
 			)
 		}
 
-		if cfg.ShardedQueries {
+		if logxy.IsActive() {
+			queryRangeMiddleware = append(queryRangeMiddleware,
+				logxy.ShardingMiddleware(
+					log,
+					schema.Configs,
+					engineOpts,
+					metrics.InstrumentMiddlewareMetrics, // instrumentation is included in the sharding middleware
+					metrics.MiddlewareMapperMetrics.shardMapper,
+					limits,
+					0, // 0 is unlimited shards
+					statsHandler,
+					cfg.ShardAggregations,
+				),
+			)
+		} else if cfg.ShardedQueries {
 			queryRangeMiddleware = append(queryRangeMiddleware,
 				NewQueryShardMiddleware(
 					log,
@@ -576,7 +591,7 @@ func NewLogFilterTripperware(cfg Config, engineOpts logql.EngineOpts, log log.Lo
 }
 
 // NewLimitedTripperware creates a new frontend tripperware responsible for handling log requests which are label matcher only, no filter expression.
-func NewLimitedTripperware(_ Config, engineOpts logql.EngineOpts, log log.Logger, limits Limits, schema config.SchemaConfig, metrics *Metrics, indexStatsTripperware base.Middleware, merger base.Merger, iqo util.IngesterQueryOptions) (base.Middleware, error) {
+func NewLimitedTripperware(cfg Config, engineOpts logql.EngineOpts, log log.Logger, limits Limits, schema config.SchemaConfig, metrics *Metrics, indexStatsTripperware base.Middleware, merger base.Merger, iqo util.IngesterQueryOptions, logxy LogxyInterface) (base.Middleware, error) {
 	return base.MiddlewareFunc(func(next base.Handler) base.Handler {
 		statsHandler := indexStatsTripperware.Wrap(next)
 
@@ -587,6 +602,26 @@ func NewLimitedTripperware(_ Config, engineOpts logql.EngineOpts, log log.Logger
 			base.InstrumentMiddleware("split_by_interval", metrics.InstrumentMiddlewareMetrics),
 			SplitByIntervalMiddleware(schema.Configs, WithMaxParallelism(limits, limitedQuerySplits), merger, newDefaultSplitter(limits, iqo), metrics.SplitByMetrics),
 			NewQuerierSizeLimiterMiddleware(schema.Configs, engineOpts, log, limits, statsHandler),
+		}
+
+		if logxy.IsActive() {
+			queryRangeMiddleware = append(queryRangeMiddleware,
+				logxy.ShardingMiddleware(
+					log,
+					schema.Configs,
+					engineOpts,
+					metrics.InstrumentMiddlewareMetrics, // instrumentation is included in the sharding middleware
+					metrics.MiddlewareMapperMetrics.shardMapper,
+					limits,
+					0, // 0 is unlimited shards
+					statsHandler,
+					cfg.ShardAggregations,
+				),
+			)
+		} else {
+			queryRangeMiddleware = append(queryRangeMiddleware,
+				NewQuerierSizeLimiterMiddleware(schema.Configs, engineOpts, log, limits, statsHandler),
+			)
 		}
 
 		if len(queryRangeMiddleware) > 0 {
@@ -755,7 +790,7 @@ func NewLabelsTripperware(
 }
 
 // NewMetricTripperware creates a new frontend tripperware responsible for handling metric queries
-func NewMetricTripperware(cfg Config, engineOpts logql.EngineOpts, log log.Logger, limits Limits, schema config.SchemaConfig, merger base.Merger, iqo util.IngesterQueryOptions, c cache.Cache, cacheGenNumLoader base.CacheGenNumberLoader, retentionEnabled bool, extractor base.Extractor, metrics *Metrics, indexStatsTripperware base.Middleware, metricsNamespace string) (base.Middleware, error) {
+func NewMetricTripperware(cfg Config, engineOpts logql.EngineOpts, log log.Logger, limits Limits, schema config.SchemaConfig, merger base.Merger, iqo util.IngesterQueryOptions, c cache.Cache, cacheGenNumLoader base.CacheGenNumberLoader, retentionEnabled bool, extractor base.Extractor, metrics *Metrics, indexStatsTripperware base.Middleware, metricsNamespace string, logxy LogxyInterface) (base.Middleware, error) {
 	cacheKey := cacheKeyLimits{limits, cfg.Transformer, iqo}
 	var queryCacheMiddleware base.Middleware
 	if cfg.CacheResults {
@@ -822,7 +857,21 @@ func NewMetricTripperware(cfg Config, engineOpts logql.EngineOpts, log log.Logge
 			)
 		}
 
-		if cfg.ShardedQueries {
+		if logxy.IsActive() {
+			queryRangeMiddleware = append(queryRangeMiddleware,
+				logxy.ShardingMiddleware(
+					log,
+					schema.Configs,
+					engineOpts,
+					metrics.InstrumentMiddlewareMetrics, // instrumentation is included in the sharding middleware
+					metrics.MiddlewareMapperMetrics.shardMapper,
+					limits,
+					0, // 0 is unlimited shards
+					statsHandler,
+					cfg.ShardAggregations,
+				),
+			)
+		} else if cfg.ShardedQueries {
 			queryRangeMiddleware = append(queryRangeMiddleware,
 				NewQueryShardMiddleware(
 					log,
@@ -880,6 +929,7 @@ func NewInstantMetricTripperware(
 	retentionEnabled bool,
 	indexStatsTripperware base.Middleware,
 	metricsNamespace string,
+	logxy LogxyInterface,
 ) (base.Middleware, error) {
 	var cacheMiddleware base.Middleware
 	if cfg.CacheInstantMetricResults {
@@ -930,7 +980,21 @@ func NewInstantMetricTripperware(
 			)
 		}
 
-		if cfg.ShardedQueries {
+		if logxy.IsActive() {
+			queryRangeMiddleware = append(queryRangeMiddleware,
+				logxy.ShardingMiddleware(
+					log,
+					schema.Configs,
+					engineOpts,
+					metrics.InstrumentMiddlewareMetrics, // instrumentation is included in the sharding middleware
+					metrics.MiddlewareMapperMetrics.shardMapper,
+					limits,
+					0, // 0 is unlimited shards
+					statsHandler,
+					cfg.ShardAggregations,
+				),
+			)
+		} else if cfg.ShardedQueries {
 			queryRangeMiddleware = append(queryRangeMiddleware,
 				NewQueryShardMiddleware(
 					log,

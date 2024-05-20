@@ -27,8 +27,8 @@ const (
 )
 
 type DownstreamHandler struct {
-	limits Limits
-	next   queryrangebase.Handler
+	Limits Limits
+	Next   queryrangebase.Handler
 
 	splitAlign bool
 }
@@ -77,7 +77,7 @@ func (h DownstreamHandler) Downstreamer(ctx context.Context) logql.Downstreamer 
 	// We may increase parallelism above the default,
 	// ensure we don't end up bottlenecking here.
 	if user, err := tenant.TenantID(ctx); err == nil {
-		if x := h.limits.MaxQueryParallelism(ctx, user); x > 0 {
+		if x := h.Limits.MaxQueryParallelism(ctx, user); x > 0 {
 			p = x
 		}
 	}
@@ -89,7 +89,7 @@ func (h DownstreamHandler) Downstreamer(ctx context.Context) logql.Downstreamer 
 	return &instance{
 		parallelism: p,
 		locks:       locks,
-		handler:     h.next,
+		handler:     h.Next,
 		splitAlign:  h.splitAlign,
 	}
 }

@@ -39,8 +39,8 @@ func NewSplitByRangeMiddleware(logger log.Logger, engineOpts logql.EngineOpts, l
 			next:   next,
 			limits: limits,
 			ng: logql.NewDownstreamEngine(engineOpts, DownstreamHandler{
-				limits:     limits,
-				next:       next,
+				Limits:     limits,
+				Next:       next,
 				splitAlign: splitAlign,
 			}, limits, logger),
 			metrics:    metrics,
@@ -121,7 +121,7 @@ func (s *splitByRange) Do(ctx context.Context, request queryrangebase.Request) (
 				Status: loghttp.QueryStatusSuccess,
 				Data: queryrangebase.PrometheusData{
 					ResultType: loghttp.ResultTypeMatrix,
-					Result:     toProtoMatrix(value.(loghttp.Matrix)),
+					Result:     ToProtoMatrix(value.(loghttp.Matrix)),
 				},
 			},
 			Statistics: res.Statistics,
@@ -132,7 +132,7 @@ func (s *splitByRange) Do(ctx context.Context, request queryrangebase.Request) (
 				Status: loghttp.QueryStatusSuccess,
 				Data: queryrangebase.PrometheusData{
 					ResultType: loghttp.ResultTypeVector,
-					Result:     toProtoVector(value.(loghttp.Vector)),
+					Result:     ToProtoVector(value.(loghttp.Vector)),
 				},
 			},
 			Statistics: res.Statistics,

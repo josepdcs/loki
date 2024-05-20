@@ -1,4 +1,4 @@
-package queryrange
+package logxy
 
 import (
 	"context"
@@ -11,7 +11,6 @@ import (
 	"github.com/go-kit/log/level"
 	"github.com/grafana/dskit/httpgrpc"
 	"github.com/grafana/dskit/tenant"
-	"github.com/pkg/errors"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/promql/parser"
 
@@ -20,9 +19,8 @@ import (
 	"github.com/grafana/loki/v3/pkg/logqlmodel"
 	"github.com/grafana/loki/v3/pkg/logqlmodel/stats"
 	"github.com/grafana/loki/v3/pkg/querier/astmapper"
+	"github.com/grafana/loki/v3/pkg/querier/queryrange"
 	"github.com/grafana/loki/v3/pkg/querier/queryrange/queryrangebase"
-	"github.com/grafana/loki/v3/pkg/storage/config"
-	"github.com/grafana/loki/v3/pkg/storage/types"
 	"github.com/grafana/loki/v3/pkg/util"
 	util_log "github.com/grafana/loki/v3/pkg/util/log"
 	"github.com/grafana/loki/v3/pkg/util/marshal"
@@ -30,25 +28,25 @@ import (
 	"github.com/grafana/loki/v3/pkg/util/validation"
 )
 
-var errInvalidShardingRange = errors.New("Query does not fit in a single sharding configuration")
-
 // NewQueryShardMiddleware creates a middleware which downstreams queries after AST mapping and query encoding.
 func NewQueryShardMiddleware(
 	logger log.Logger,
-	confs ShardingConfigs,
+	confs queryrange.ShardingConfigs,
 	engineOpts logql.EngineOpts,
 	middlewareMetrics *queryrangebase.InstrumentMiddlewareMetrics,
 	shardingMetrics *logql.MapperMetrics,
-	limits Limits,
+	limits queryrange.Limits,
 	maxShards int,
 	statsHandler queryrangebase.Handler,
 	shardAggregation []string,
+	logxy queryrange.LogxyInterface,
 ) queryrangebase.Middleware {
-	noshards := !hasShards(confs)
+
+	noshards := !hasShards(logxy.Config())
 
 	if noshards {
 		level.Warn(logger).Log(
-			"middleware", "QueryShard",
+			"middleware", "LogxyQueryShard",
 			"msg", "no configuration with shard found",
 			"confs", fmt.Sprintf("%+v", confs),
 		)
@@ -56,7 +54,7 @@ func NewQueryShardMiddleware(
 	}
 
 	mapperware := queryrangebase.MiddlewareFunc(func(next queryrangebase.Handler) queryrangebase.Handler {
-		return newASTMapperware(confs, engineOpts, next, statsHandler, logger, shardingMetrics, limits, maxShards, shardAggregation)
+		return newASTMapperware(confs, engineOpts, next, statsHandler, logger, shardingMetrics, limits, maxShards, shardAggregation, logxy)
 	})
 
 	return queryrangebase.MiddlewareFunc(func(next queryrangebase.Handler) queryrangebase.Handler {
@@ -66,22 +64,24 @@ func NewQueryShardMiddleware(
 				queryrangebase.InstrumentMiddleware("shardingware", middlewareMetrics),
 				mapperware,
 			).Wrap(next),
-			now:  time.Now,
-			next: queryrangebase.InstrumentMiddleware("sharding-bypass", middlewareMetrics).Wrap(next),
+			now:   time.Now,
+			next:  queryrangebase.InstrumentMiddleware("sharding-bypass", middlewareMetrics).Wrap(next),
+			logxy: logxy,
 		}
 	})
 }
 
 func newASTMapperware(
-	confs ShardingConfigs,
+	confs queryrange.ShardingConfigs,
 	engineOpts logql.EngineOpts,
 	next queryrangebase.Handler,
 	statsHandler queryrangebase.Handler,
 	logger log.Logger,
 	metrics *logql.MapperMetrics,
-	limits Limits,
+	limits queryrange.Limits,
 	maxShards int,
 	shardAggregation []string,
+	logxy queryrange.LogxyInterface,
 ) *astMapperware {
 	ast := &astMapperware{
 		confs:            confs,
@@ -89,10 +89,11 @@ func newASTMapperware(
 		limits:           limits,
 		next:             next,
 		statsHandler:     next,
-		ng:               logql.NewDownstreamEngine(engineOpts, DownstreamHandler{Next: next, Limits: limits}, limits, logger),
+		ng:               logql.NewDownstreamEngine(engineOpts, queryrange.DownstreamHandler{Limits: limits, Next: next}, limits, logger),
 		metrics:          metrics,
 		maxShards:        maxShards,
 		shardAggregation: shardAggregation,
+		logxy:            logxy,
 	}
 
 	if statsHandler != nil {
@@ -103,9 +104,9 @@ func newASTMapperware(
 }
 
 type astMapperware struct {
-	confs        ShardingConfigs
+	confs        queryrange.ShardingConfigs
 	logger       log.Logger
-	limits       Limits
+	limits       queryrange.Limits
 	next         queryrangebase.Handler
 	statsHandler queryrangebase.Handler
 	ng           *logql.DownstreamEngine
@@ -115,6 +116,7 @@ type astMapperware struct {
 	// Feature flag for sharding range and vector aggregations such as
 	// quantile_ver_time with probabilistic data structures.
 	shardAggregation []string
+	logxy            queryrange.LogxyInterface
 }
 
 func (ast *astMapperware) checkQuerySizeLimit(ctx context.Context, bytesPerShard uint64, notShardable bool) error {
@@ -131,9 +133,9 @@ func (ast *astMapperware) checkQuerySizeLimit(ctx context.Context, bytesPerShard
 		if bytesPerShard > uint64(maxBytesRead) {
 			level.Warn(ast.logger).Log("msg", "Query exceeds limits", "status", "rejected", "limit_name", "MaxQuerierBytesRead", "limit_bytes", maxBytesReadStr, "resolved_bytes", statsBytesStr)
 
-			errorTmpl := LimErrQuerierTooManyBytesShardableTmpl
+			errorTmpl := queryrange.LimErrQuerierTooManyBytesShardableTmpl
 			if notShardable {
-				errorTmpl = LimErrQuerierTooManyBytesUnshardableTmpl
+				errorTmpl = queryrange.LimErrQuerierTooManyBytesUnshardableTmpl
 			}
 
 			return httpgrpc.Errorf(http.StatusBadRequest, errorTmpl, statsBytesStr, maxBytesReadStr)
@@ -151,25 +153,7 @@ func (ast *astMapperware) Do(ctx context.Context, r queryrangebase.Request) (que
 		util_log.WithContext(ctx, ast.logger),
 	)
 
-	params, err := ParamsFromRequest(r)
-	if err != nil {
-		return nil, err
-	}
-
-	maxRVDuration, maxOffset, err := maxRangeVectorAndOffsetDuration(params.GetExpression())
-	if err != nil {
-		level.Warn(logger).Log("err", err.Error(), "msg", "failed to get range-vector and offset duration so skipped AST mapper for request")
-		return ast.next.Do(ctx, r)
-	}
-
-	conf, err := ast.confs.GetConf(int64(model.Time(r.GetStart().UnixMilli()).Add(-maxRVDuration).Add(-maxOffset)), int64(model.Time(r.GetEnd().UnixMilli()).Add(-maxOffset)))
-	// cannot shard with this timerange
-	if err != nil {
-		level.Warn(logger).Log("err", err.Error(), "msg", "skipped AST mapper for request")
-		return ast.next.Do(ctx, r)
-	}
-
-	tenants, err := tenant.TenantIDs(ctx)
+	params, err := queryrange.ParamsFromRequest(r)
 	if err != nil {
 		return nil, err
 	}
@@ -181,36 +165,9 @@ func (ast *astMapperware) Do(ctx context.Context, r queryrangebase.Request) (que
 	// will merge with the stats returned from the engine.
 	resolverStats, ctx := stats.NewContext(ctx)
 
-	resolver, ok := shardResolverForConf(
-		ctx,
-		conf,
-		ast.ng.Opts().MaxLookBackPeriod,
-		ast.logger,
-		MinWeightedParallelism(ctx, tenants, ast.confs, ast.limits, model.Time(r.GetStart().UnixMilli()), model.Time(r.GetEnd().UnixMilli())),
-		ast.maxShards,
-		r,
-		ast.statsHandler,
-		ast.next,
-		ast.limits,
-	)
-	if !ok {
-		return ast.next.Do(ctx, r)
-	}
+	shardingStrategy := NewShardingStrategy(ast.logxy.Config())
 
-	v := ast.limits.TSDBShardingStrategy(tenants[0])
-	version, err := logql.ParseShardVersion(v)
-	if err != nil {
-		level.Warn(logger).Log(
-			"msg", "failed to parse shard version",
-			"fallback", version.String(),
-			"err", err.Error(),
-			"user", tenants[0],
-			"query", r.GetQuery(),
-		)
-	}
-	strategy := version.Strategy(resolver, uint64(ast.limits.TSDBMaxBytesPerShard(tenants[0])))
-
-	mapper := logql.NewShardMapper(strategy, ast.metrics, ast.shardAggregation)
+	mapper := logql.NewShardMapper(shardingStrategy, ast.metrics, ast.shardAggregation)
 
 	noop, bytesPerShard, parsed, err := mapper.Parse(params.GetExpression())
 	if err != nil {
@@ -232,9 +189,9 @@ func (ast *astMapperware) Do(ctx context.Context, r queryrangebase.Request) (que
 
 	var path string
 	switch r := r.(type) {
-	case *LokiRequest:
+	case *queryrange.LokiRequest:
 		path = r.GetPath()
-	case *LokiInstantRequest:
+	case *queryrange.LokiInstantRequest:
 		path = r.GetPath()
 	default:
 		return nil, fmt.Errorf("expected *LokiRequest or *LokiInstantRequest, got (%T)", r)
@@ -255,12 +212,12 @@ func (ast *astMapperware) Do(ctx context.Context, r queryrangebase.Request) (que
 
 	switch res.Data.Type() {
 	case parser.ValueTypeMatrix:
-		return &LokiPromResponse{
+		return &queryrange.LokiPromResponse{
 			Response: &queryrangebase.PrometheusResponse{
 				Status: loghttp.QueryStatusSuccess,
 				Data: queryrangebase.PrometheusData{
 					ResultType: loghttp.ResultTypeMatrix,
-					Result:     ToProtoMatrix(value.(loghttp.Matrix)),
+					Result:     queryrange.ToProtoMatrix(value.(loghttp.Matrix)),
 				},
 				Headers:  res.Headers,
 				Warnings: res.Warnings,
@@ -273,13 +230,13 @@ func (ast *astMapperware) Do(ctx context.Context, r queryrangebase.Request) (que
 			respHeaders = append(respHeaders, *res.Headers[i])
 		}
 
-		return &LokiResponse{
+		return &queryrange.LokiResponse{
 			Status:     loghttp.QueryStatusSuccess,
 			Direction:  params.Direction(),
 			Limit:      params.Limit(),
 			Version:    uint32(loghttp.GetVersion(path)),
 			Statistics: res.Statistics,
-			Data: LokiData{
+			Data: queryrange.LokiData{
 				ResultType: loghttp.ResultTypeStream,
 				Result:     value.(loghttp.Streams).ToProto(),
 			},
@@ -287,13 +244,13 @@ func (ast *astMapperware) Do(ctx context.Context, r queryrangebase.Request) (que
 			Warnings: res.Warnings,
 		}, nil
 	case parser.ValueTypeVector:
-		return &LokiPromResponse{
+		return &queryrange.LokiPromResponse{
 			Statistics: res.Statistics,
 			Response: &queryrangebase.PrometheusResponse{
 				Status: loghttp.QueryStatusSuccess,
 				Data: queryrangebase.PrometheusData{
 					ResultType: loghttp.ResultTypeVector,
-					Result:     ToProtoVector(value.(loghttp.Vector)),
+					Result:     queryrange.ToProtoVector(value.(loghttp.Vector)),
 				},
 				Headers:  res.Headers,
 				Warnings: res.Warnings,
@@ -308,10 +265,11 @@ func (ast *astMapperware) Do(ctx context.Context, r queryrangebase.Request) (que
 // This is used to send nonsharded requests to the ingesters in order to not overload them.
 // TODO(owen-d): export in cortex so we don't duplicate code
 type shardSplitter struct {
-	limits       Limits                 // delimiter for splitting sharded vs non-sharded queries
+	limits       queryrange.Limits      // delimiter for splitting sharded vs non-sharded queries
 	shardingware queryrangebase.Handler // handler for sharded queries
 	next         queryrangebase.Handler // handler for non-sharded queries
 	now          func() time.Time       // injectable time.Now
+	logxy        queryrange.LogxyInterface
 }
 
 func (splitter *shardSplitter) Do(ctx context.Context, r queryrangebase.Request) (queryrangebase.Response, error) {
@@ -319,6 +277,11 @@ func (splitter *shardSplitter) Do(ctx context.Context, r queryrangebase.Request)
 	if err != nil {
 		return nil, httpgrpc.Errorf(http.StatusBadRequest, err.Error())
 	}
+
+	if splitter.logxy.IsActive() {
+		return splitter.shardingware.Do(ctx, r)
+	}
+
 	minShardingLookback := validation.SmallestPositiveNonZeroDurationPerTenant(tenantIDs, splitter.limits.MinShardingLookback)
 	if minShardingLookback == 0 {
 		return splitter.shardingware.Do(ctx, r)
@@ -332,64 +295,22 @@ func (splitter *shardSplitter) Do(ctx context.Context, r queryrangebase.Request)
 	return splitter.next.Do(ctx, r)
 }
 
-func hasShards(confs ShardingConfigs) bool {
-	for _, conf := range confs {
-		if conf.RowShards > 0 || conf.IndexType == types.TSDBType {
-			return true
-		}
-	}
-	return false
-}
-
-// ShardingConfigs is a slice of chunk shard configs
-type ShardingConfigs []config.PeriodConfig
-
-// ValidRange extracts a non-overlapping sharding configuration from a list of configs and a time range.
-func (confs ShardingConfigs) ValidRange(start, end int64) (config.PeriodConfig, error) {
-	for i, conf := range confs {
-		if start < int64(conf.From.Time) {
-			// the query starts before this config's range
-			return config.PeriodConfig{}, errInvalidShardingRange
-		} else if i == len(confs)-1 {
-			// the last configuration has no upper bound
-			return conf, nil
-		} else if end < int64(confs[i+1].From.Time) {
-			// The request is entirely scoped into this shard config
-			return conf, nil
-		}
-
-		continue
-	}
-
-	return config.PeriodConfig{}, errInvalidShardingRange
-}
-
-// GetConf will extract a shardable config corresponding to a request and the shardingconfigs
-func (confs ShardingConfigs) GetConf(start, end int64) (config.PeriodConfig, error) {
-	conf, err := confs.ValidRange(start, end)
-	// query exists across multiple sharding configs
-	if err != nil {
-		return conf, err
-	}
-
-	// query doesn't have shard factor, so don't try to do AST mapping.
-	if conf.RowShards < 2 && conf.IndexType != types.TSDBType {
-		return conf, errors.Errorf("shard factor not high enough: [%d]", conf.RowShards)
-	}
-
-	return conf, nil
+func hasShards(cfg queryrange.LogxyConfig) bool {
+	// TODO
+	return true
 }
 
 // NewSeriesQueryShardMiddleware creates a middleware which shards series queries.
 func NewSeriesQueryShardMiddleware(
 	logger log.Logger,
-	confs ShardingConfigs,
+	confs queryrange.ShardingConfigs,
 	middlewareMetrics *queryrangebase.InstrumentMiddlewareMetrics,
 	shardingMetrics *logql.MapperMetrics,
-	limits Limits,
+	limits queryrange.Limits,
 	merger queryrangebase.Merger,
+	logxy queryrange.LogxyInterface,
 ) queryrangebase.Middleware {
-	noshards := !hasShards(confs)
+	noshards := !hasShards(logxy.Config())
 
 	if noshards {
 		level.Warn(logger).Log(
@@ -414,11 +335,11 @@ func NewSeriesQueryShardMiddleware(
 }
 
 type seriesShardingHandler struct {
-	confs   ShardingConfigs
+	confs   queryrange.ShardingConfigs
 	logger  log.Logger
 	next    queryrangebase.Handler
 	metrics *logql.MapperMetrics
-	limits  Limits
+	limits  queryrange.Limits
 	merger  queryrangebase.Merger
 }
 
@@ -430,7 +351,7 @@ func (ss *seriesShardingHandler) Do(ctx context.Context, r queryrangebase.Reques
 		return ss.next.Do(ctx, r)
 	}
 
-	req, ok := r.(*LokiSeriesRequest)
+	req, ok := r.(*queryrange.LokiSeriesRequest)
 	if !ok {
 		return nil, fmt.Errorf("expected *LokiSeriesRequest, got (%T)", r)
 	}
@@ -456,7 +377,7 @@ func (ss *seriesShardingHandler) Do(ctx context.Context, r queryrangebase.Reques
 		ctx,
 		ss.next,
 		requests,
-		MinWeightedParallelism(ctx, tenantIDs, ss.confs, ss.limits, model.Time(req.GetStart().UnixMilli()), model.Time(req.GetEnd().UnixMilli())),
+		queryrange.MinWeightedParallelism(ctx, tenantIDs, ss.confs, ss.limits, model.Time(req.GetStart().UnixMilli()), model.Time(req.GetEnd().UnixMilli())),
 	)
 	if err != nil {
 		return nil, err

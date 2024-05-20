@@ -44,8 +44,8 @@ const (
 	requiredNumberLabelsErrTmpl              = "stream selector has less label matchers than required: (present: [%s], number_present: %d, required_number_label_matchers: %d)"
 	limErrQueryTooManyBytesTmpl              = "the query would read too many bytes (query: %s, limit: %s); consider adding more specific stream selectors or reduce the time range of the query"
 	limErrQuerierTooManyBytesTmpl            = "query too large to execute on a single querier: (query: %s, limit: %s); consider adding more specific stream selectors, reduce the time range of the query, or adjust parallelization settings"
-	limErrQuerierTooManyBytesUnshardableTmpl = "un-shardable query too large to execute on a single querier: (query: %s, limit: %s); consider adding more specific stream selectors or reduce the time range of the query"
-	limErrQuerierTooManyBytesShardableTmpl   = "shard query is too large to execute on a single querier: (query: %s, limit: %s); consider adding more specific stream selectors or reduce the time range of the query"
+	LimErrQuerierTooManyBytesUnshardableTmpl = "un-shardable query too large to execute on a single querier: (query: %s, limit: %s); consider adding more specific stream selectors or reduce the time range of the query"
+	LimErrQuerierTooManyBytesShardableTmpl   = "shard query is too large to execute on a single querier: (query: %s, limit: %s); consider adding more specific stream selectors or reduce the time range of the query"
 )
 
 var (
@@ -332,8 +332,8 @@ func (q *querySizeLimiter) guessLimitName() string {
 		return "MaxQueryBytesRead"
 	}
 	if q.limitErrorTmpl == limErrQuerierTooManyBytesTmpl ||
-		q.limitErrorTmpl == limErrQuerierTooManyBytesShardableTmpl ||
-		q.limitErrorTmpl == limErrQuerierTooManyBytesUnshardableTmpl {
+		q.limitErrorTmpl == LimErrQuerierTooManyBytesShardableTmpl ||
+		q.limitErrorTmpl == LimErrQuerierTooManyBytesUnshardableTmpl {
 		return "MaxQuerierBytesRead"
 	}
 	return "unknown"

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/grafana/loki/v3/pkg/logxy"
 	"hash/fnv"
 	"math"
 	"net"
@@ -129,6 +130,7 @@ const (
 	Backend                  string = "backend"
 	Analytics                string = "analytics"
 	InitCodec                string = "init-codec"
+	Logxy                    string = "logxy"
 )
 
 const (
@@ -931,6 +933,7 @@ func (t *Loki) initQueryFrontendMiddleware() (_ services.Service, err error) {
 		t.cacheGenerationLoader, t.Cfg.CompactorConfig.RetentionEnabled,
 		prometheus.DefaultRegisterer,
 		t.Cfg.MetricsNamespace,
+		queryrange.EmptyLogxy(),
 	)
 	if err != nil {
 		return
@@ -1805,4 +1808,123 @@ func schemaHasBoltDBShipperConfig(scfg config.SchemaConfig) bool {
 	}
 
 	return false
+}
+
+func (t *Loki) initLogxy() (_ services.Service, err error) {
+	level.Debug(util_log.Logger).Log("msg", "initializing logxy tripperware")
+	logxyMiddleware, stopper, err := queryrange.NewMiddleware(
+		t.Cfg.QueryRange,
+		t.Cfg.Querier.Engine,
+		ingesterQueryOptions{t.Cfg.Querier},
+		util_log.Logger,
+		t.Overrides,
+		t.Cfg.SchemaConfig,
+		t.cacheGenerationLoader, t.Cfg.CompactorConfig.RetentionEnabled,
+		prometheus.DefaultRegisterer,
+		t.Cfg.MetricsNamespace,
+		logxy.New(t.Cfg.LogxyConfig),
+	)
+	if err != nil {
+		return
+	}
+
+	level.Info(util_log.Logger).Log("msg", "initializing logxy", "config", fmt.Sprintf("%+v", t.Cfg.Frontend))
+	level.Info(util_log.Logger).Log("msg", "initializing logxy", "config", fmt.Sprintf("%+v", t.Cfg.LogxyConfig))
+
+	logxyTripper, err := logxy.NewDownstreamRoundTripper(t.Cfg.Frontend.DownstreamURL, http.DefaultTransport, t.Cfg.LogxyConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	roundTripper := queryrange.NewSerializeRoundTripper(logxyMiddleware.Wrap(logxyTripper), queryrange.DefaultCodec)
+
+	logxyHandler := transport.NewHandler(t.Cfg.Frontend.Handler, roundTripper, util_log.Logger, prometheus.DefaultRegisterer, t.Cfg.MetricsNamespace)
+	if t.Cfg.Frontend.CompressResponses {
+		logxyHandler = gziphandler.GzipHandler(logxyHandler)
+	}
+
+	toMerge := []middleware.Interface{
+		httpreq.ExtractQueryTagsMiddleware(),
+		httpreq.PropagateHeadersMiddleware(httpreq.LokiActorPathHeader, httpreq.LokiEncodingFlagsHeader, httpreq.LokiDisablePipelineWrappersHeader),
+		serverutil.RecoveryHTTPMiddleware,
+		t.HTTPAuthMiddleware,
+		queryrange.StatsHTTPMiddleware,
+		serverutil.NewPrepopulateMiddleware(),
+		serverutil.ResponseJSONMiddleware(),
+	}
+
+	if t.Cfg.Querier.PerRequestLimitsEnabled {
+		logger := log.With(util_log.Logger, "component", "query-limiter-middleware")
+		toMerge = append(toMerge, querylimits.NewQueryLimitsMiddleware(logger))
+	}
+
+	logxyHandler = middleware.Merge(toMerge...).Wrap(logxyHandler)
+
+	var defaultHandler http.Handler
+	// If this process also acts as a Querier we don't do any proxying of tail requests
+	if t.Cfg.Frontend.TailProxyURL != "" && !t.isModuleActive(Querier) {
+		httpMiddleware := middleware.Merge(
+			httpreq.ExtractQueryTagsMiddleware(),
+			t.HTTPAuthMiddleware,
+			queryrange.StatsHTTPMiddleware,
+		)
+		tailURL, err := url.Parse(t.Cfg.Frontend.TailProxyURL)
+		if err != nil {
+			return nil, err
+		}
+		tp := httputil.NewSingleHostReverseProxy(tailURL)
+
+		cfg, err := t.Cfg.Frontend.TLS.GetTLSConfig()
+		if err != nil {
+			return nil, err
+		}
+
+		tp.Transport = &http.Transport{
+			TLSClientConfig: cfg,
+		}
+
+		director := tp.Director
+		tp.Director = func(req *http.Request) {
+			director(req)
+			req.Host = tailURL.Host
+		}
+
+		defaultHandler = httpMiddleware.Wrap(tp)
+	} else {
+		defaultHandler = logxyHandler
+	}
+
+	t.Server.HTTP.Path("/loki/api/v1/query_range").Methods("GET", "POST").Handler(logxyHandler)
+	t.Server.HTTP.Path("/loki/api/v1/query").Methods("GET", "POST").Handler(logxyHandler)
+	t.Server.HTTP.Path("/loki/api/v1/label").Methods("GET", "POST").Handler(logxyHandler)
+	t.Server.HTTP.Path("/loki/api/v1/labels").Methods("GET", "POST").Handler(logxyHandler)
+	t.Server.HTTP.Path("/loki/api/v1/label/{name}/values").Methods("GET", "POST").Handler(logxyHandler)
+	t.Server.HTTP.Path("/loki/api/v1/series").Methods("GET", "POST").Handler(logxyHandler)
+	t.Server.HTTP.Path("/loki/api/v1/detected_fields").Methods("GET", "POST").Handler(logxyHandler)
+	t.Server.HTTP.Path("/loki/api/v1/patterns").Methods("GET", "POST").Handler(logxyHandler)
+	t.Server.HTTP.Path("/loki/api/v1/detected_labels").Methods("GET", "POST").Handler(logxyHandler)
+	t.Server.HTTP.Path("/loki/api/v1/index/stats").Methods("GET", "POST").Handler(logxyHandler)
+	t.Server.HTTP.Path("/loki/api/v1/index/shards").Methods("GET", "POST").Handler(logxyHandler)
+	t.Server.HTTP.Path("/loki/api/v1/index/volume").Methods("GET", "POST").Handler(logxyHandler)
+	t.Server.HTTP.Path("/loki/api/v1/index/volume_range").Methods("GET", "POST").Handler(logxyHandler)
+	t.Server.HTTP.Path("/api/prom/query").Methods("GET", "POST").Handler(logxyHandler)
+	t.Server.HTTP.Path("/api/prom/label").Methods("GET", "POST").Handler(logxyHandler)
+	t.Server.HTTP.Path("/api/prom/label/{name}/values").Methods("GET", "POST").Handler(logxyHandler)
+	t.Server.HTTP.Path("/api/prom/series").Methods("GET", "POST").Handler(logxyHandler)
+
+	// Only register tailing requests if this process does not act as a Querier
+	// If this process is also a Querier the Querier will register the tail endpoints.
+	if !t.isModuleActive(Querier) {
+		// defer tail endpoints to the default handler
+		t.Server.HTTP.Path("/loki/api/v1/tail").Methods("GET", "POST").Handler(defaultHandler)
+		t.Server.HTTP.Path("/api/prom/tail").Methods("GET", "POST").Handler(defaultHandler)
+	}
+
+	return services.NewIdleService(nil, func(_ error) error {
+		if stopper != nil {
+			stopper.Stop()
+			stopper = nil
+		}
+		return nil
+	}), nil
 }

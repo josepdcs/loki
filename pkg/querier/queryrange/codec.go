@@ -1192,7 +1192,7 @@ func decodeResponseJSONFrom(buf []byte, req queryrangebase.Request, headers http
 					Status: resp.Status,
 					Data: queryrangebase.PrometheusData{
 						ResultType: loghttp.ResultTypeMatrix,
-						Result:     toProtoMatrix(resp.Data.Result.(loghttp.Matrix)),
+						Result:     ToProtoMatrix(resp.Data.Result.(loghttp.Matrix)),
 					},
 					Headers:  convertPrometheusResponseHeadersToPointers(httpResponseHeadersToPromResponseHeaders(headers)),
 					Warnings: resp.Warnings,
@@ -1234,7 +1234,7 @@ func decodeResponseJSONFrom(buf []byte, req queryrangebase.Request, headers http
 					Status: resp.Status,
 					Data: queryrangebase.PrometheusData{
 						ResultType: loghttp.ResultTypeVector,
-						Result:     toProtoVector(resp.Data.Result.(loghttp.Vector)),
+						Result:     ToProtoVector(resp.Data.Result.(loghttp.Vector)),
 					},
 					Headers:  convertPrometheusResponseHeadersToPointers(httpResponseHeadersToPromResponseHeaders(headers)),
 					Warnings: resp.Warnings,
@@ -1702,7 +1702,7 @@ func mergeOrderedNonOverlappingStreams(resps []*LokiResponse, limit uint32, dire
 	return results
 }
 
-func toProtoMatrix(m loghttp.Matrix) []queryrangebase.SampleStream {
+func ToProtoMatrix(m loghttp.Matrix) []queryrangebase.SampleStream {
 	res := make([]queryrangebase.SampleStream, 0, len(m))
 
 	if len(m) == 0 {
@@ -1725,7 +1725,7 @@ func toProtoMatrix(m loghttp.Matrix) []queryrangebase.SampleStream {
 	return res
 }
 
-func toProtoVector(v loghttp.Vector) []queryrangebase.SampleStream {
+func ToProtoVector(v loghttp.Vector) []queryrangebase.SampleStream {
 	res := make([]queryrangebase.SampleStream, 0, len(v))
 
 	if len(v) == 0 {

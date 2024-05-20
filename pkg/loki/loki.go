@@ -114,6 +114,8 @@ type Config struct {
 	ShutdownDelay time.Duration `yaml:"shutdown_delay"`
 
 	MetricsNamespace string `yaml:"metrics_namespace"`
+
+	LogxyConfig queryrange.LogxyConfig `yaml:"logxy,omitempty"`
 }
 
 // RegisterFlags registers flag.
@@ -176,6 +178,7 @@ func (c *Config) RegisterFlags(f *flag.FlagSet) {
 	c.QueryScheduler.RegisterFlags(f)
 	c.Analytics.RegisterFlags(f)
 	c.OperationalConfig.RegisterFlags(f)
+	c.LogxyConfig.RegisterFlags(f)
 }
 
 func (c *Config) registerServerFlagsWithChangedDefaultValues(fs *flag.FlagSet) {
@@ -660,6 +663,8 @@ func (t *Loki) setupModuleManager() error {
 	mm.RegisterModule(PatternIngester, t.initPatternIngester)
 	mm.RegisterModule(PatternRingClient, t.initPatternRingClient, modules.UserInvisibleModule)
 
+	mm.RegisterModule(Logxy, t.initLogxy)
+
 	mm.RegisterModule(All, nil)
 	mm.RegisterModule(Read, nil)
 	mm.RegisterModule(Write, nil)
@@ -693,6 +698,7 @@ func (t *Loki) setupModuleManager() error {
 		IndexGatewayRing:         {Overrides, MemberlistKV},
 		BloomCompactorRing:       {Overrides, MemberlistKV},
 		MemberlistKV:             {Server},
+		Logxy:                    {Server, Overrides, TenantConfigs},
 
 		Read:    {QueryFrontend, Querier},
 		Write:   {Ingester, Distributor, PatternIngester},

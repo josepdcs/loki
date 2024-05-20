@@ -1,8 +1,8 @@
 target: logxy
 auth_enabled: false
 server:
-  http_listen_port: 3101
-  grpc_listen_port: 9097
+  http_listen_port: 3100
+  grpc_listen_port: 9096
 
 
 tracing:
@@ -30,13 +30,12 @@ query_range:
         max_size_mb: 100
 
 logxy:
-  sharding_failback_strategy: logs_as_metrics # logs_as_metrics | backend_with_most_data
   downstream_servers:
     - name: loki1
-      url: "http://localhost:3100"
+      url: "http://localhost:3200"
       max_bytes: 600MB
     - name: loki2
-      url: "http://localhost:3200"
+      url: "http://localhost:3300"
       max_bytes: 600MB
 
 
@@ -58,7 +57,7 @@ schema_config:
 #   tsdb_sharding_strategy: server_group
 
 frontend:
-  downstream_url: "http://localhost:3100"
+  downstream_url: "http://localhost:3200"
 
 ruler:
   alertmanager_url: http://localhost:9093

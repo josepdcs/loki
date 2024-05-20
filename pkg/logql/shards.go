@@ -2,6 +2,7 @@ package logql
 
 import (
 	"encoding/json"
+	"strings"
 
 	"github.com/grafana/dskit/multierror"
 	"github.com/pkg/errors"
@@ -23,7 +24,6 @@ type ShardVersion uint8
 const (
 	PowerOfTwoVersion ShardVersion = iota
 	BoundedVersion
-	LogxyVersion
 )
 
 func (v ShardVersion) Strategy(resolver ShardResolver, defaultTargetShardBytes uint64) ShardingStrategy {
@@ -69,9 +69,7 @@ type ShardResolver interface {
 
 type ConstantShards int
 
-func (s ConstantShards) Shards(_ syntax.Expr) (int, uint64, error) {
-	return int(s), 0, nil
-}
+func (s ConstantShards) Shards(_ syntax.Expr) (int, uint64, error) { return int(s), 0, nil }
 func (s ConstantShards) ShardingRanges(_ syntax.Expr, _ uint64) ([]logproto.Shard, error) {
 	return sharding.LinearShards(int(s), 0), nil
 }
@@ -142,11 +140,23 @@ func (s PowerOfTwoStrategy) Shards(expr syntax.Expr) (Shards, uint64, error) {
 	return res, bytesPerShard, nil
 }
 
+const (
+	LogxyShardingVersion = "logxy"
+	LogxySharingV1       = LogxyShardingVersion + "_v1"
+)
+
+type LogxyShard struct {
+	Version string `protobuf:"bytes,1,opt,name=version,proto3" json:"version"`
+	Name    string `protobuf:"bytes,2,opt,name=name,proto3" json:"name"`
+	Url     string `protobuf:"bytes,3,opt,name=url,proto3" json:"url"`
+}
+
 // Shard represents a shard annotation
 // It holds either a power of two shard (legacy) or a bounded shard
 type Shard struct {
 	PowerOfTwo *index.ShardAnnotation
 	Bounded    *logproto.Shard
+	LogxyShard *LogxyShard
 }
 
 func (s *Shard) Variant() ShardVersion {
@@ -196,6 +206,14 @@ func (s Shard) String() string {
 		return string(b)
 	}
 
+	if s.LogxyShard != nil {
+		b, err := json.Marshal(s.LogxyShard)
+		if err != nil {
+			panic(err)
+		}
+		return string(b)
+	}
+
 	return s.PowerOfTwo.String()
 }
 
@@ -232,6 +250,15 @@ func ParseShards(strs []string) (Shards, ShardVersion, error) {
 }
 
 func ParseShard(s string) (Shard, ShardVersion, error) {
+
+	if strings.Contains(s, LogxyShardingVersion) {
+		var logxyShard LogxyShard
+		sgErr := json.Unmarshal([]byte(s), &logxyShard)
+		if sgErr == nil {
+			// return Shard{ServerGroupShard: &serverGroup}, ServerGroupVersion, nil
+			return Shard{LogxyShard: &logxyShard}, PowerOfTwoVersion, nil
+		}
+	}
 
 	var bounded logproto.Shard
 	v2Err := json.Unmarshal([]byte(s), &bounded)
