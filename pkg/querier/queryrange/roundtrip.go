@@ -137,7 +137,7 @@ func NewMiddleware(
 	retentionEnabled bool,
 	registerer prometheus.Registerer,
 	metricsNamespace string,
-	logxy LogxyInterface,
+	logxy Logxy,
 ) (base.Middleware, Stopper, error) {
 	metrics := NewMetrics(registerer, metricsNamespace)
 
@@ -512,7 +512,7 @@ func getOperation(path string) string {
 }
 
 // NewLogFilterTripperware creates a new frontend tripperware responsible for handling log requests.
-func NewLogFilterTripperware(cfg Config, engineOpts logql.EngineOpts, log log.Logger, limits Limits, schema config.SchemaConfig, merger base.Merger, iqo util.IngesterQueryOptions, c cache.Cache, metrics *Metrics, indexStatsTripperware base.Middleware, metricsNamespace string, logxy LogxyInterface) (base.Middleware, error) {
+func NewLogFilterTripperware(cfg Config, engineOpts logql.EngineOpts, log log.Logger, limits Limits, schema config.SchemaConfig, merger base.Merger, iqo util.IngesterQueryOptions, c cache.Cache, metrics *Metrics, indexStatsTripperware base.Middleware, metricsNamespace string, logxy Logxy) (base.Middleware, error) {
 	return base.MiddlewareFunc(func(next base.Handler) base.Handler {
 		statsHandler := indexStatsTripperware.Wrap(next)
 
@@ -543,7 +543,7 @@ func NewLogFilterTripperware(cfg Config, engineOpts logql.EngineOpts, log log.Lo
 			)
 		}
 
-		if logxy.IsActive() {
+		if logxy.Enabled() {
 			queryRangeMiddleware = append(queryRangeMiddleware,
 				logxy.ShardingMiddleware(
 					log,
@@ -591,7 +591,7 @@ func NewLogFilterTripperware(cfg Config, engineOpts logql.EngineOpts, log log.Lo
 }
 
 // NewLimitedTripperware creates a new frontend tripperware responsible for handling log requests which are label matcher only, no filter expression.
-func NewLimitedTripperware(cfg Config, engineOpts logql.EngineOpts, log log.Logger, limits Limits, schema config.SchemaConfig, metrics *Metrics, indexStatsTripperware base.Middleware, merger base.Merger, iqo util.IngesterQueryOptions, logxy LogxyInterface) (base.Middleware, error) {
+func NewLimitedTripperware(cfg Config, engineOpts logql.EngineOpts, log log.Logger, limits Limits, schema config.SchemaConfig, metrics *Metrics, indexStatsTripperware base.Middleware, merger base.Merger, iqo util.IngesterQueryOptions, logxy Logxy) (base.Middleware, error) {
 	return base.MiddlewareFunc(func(next base.Handler) base.Handler {
 		statsHandler := indexStatsTripperware.Wrap(next)
 
@@ -604,7 +604,7 @@ func NewLimitedTripperware(cfg Config, engineOpts logql.EngineOpts, log log.Logg
 			NewQuerierSizeLimiterMiddleware(schema.Configs, engineOpts, log, limits, statsHandler),
 		}
 
-		if logxy.IsActive() {
+		if logxy.Enabled() {
 			queryRangeMiddleware = append(queryRangeMiddleware,
 				logxy.ShardingMiddleware(
 					log,
@@ -790,7 +790,7 @@ func NewLabelsTripperware(
 }
 
 // NewMetricTripperware creates a new frontend tripperware responsible for handling metric queries
-func NewMetricTripperware(cfg Config, engineOpts logql.EngineOpts, log log.Logger, limits Limits, schema config.SchemaConfig, merger base.Merger, iqo util.IngesterQueryOptions, c cache.Cache, cacheGenNumLoader base.CacheGenNumberLoader, retentionEnabled bool, extractor base.Extractor, metrics *Metrics, indexStatsTripperware base.Middleware, metricsNamespace string, logxy LogxyInterface) (base.Middleware, error) {
+func NewMetricTripperware(cfg Config, engineOpts logql.EngineOpts, log log.Logger, limits Limits, schema config.SchemaConfig, merger base.Merger, iqo util.IngesterQueryOptions, c cache.Cache, cacheGenNumLoader base.CacheGenNumberLoader, retentionEnabled bool, extractor base.Extractor, metrics *Metrics, indexStatsTripperware base.Middleware, metricsNamespace string, logxy Logxy) (base.Middleware, error) {
 	cacheKey := cacheKeyLimits{limits, cfg.Transformer, iqo}
 	var queryCacheMiddleware base.Middleware
 	if cfg.CacheResults {
@@ -857,7 +857,7 @@ func NewMetricTripperware(cfg Config, engineOpts logql.EngineOpts, log log.Logge
 			)
 		}
 
-		if logxy.IsActive() {
+		if logxy.Enabled() {
 			queryRangeMiddleware = append(queryRangeMiddleware,
 				logxy.ShardingMiddleware(
 					log,
@@ -929,7 +929,7 @@ func NewInstantMetricTripperware(
 	retentionEnabled bool,
 	indexStatsTripperware base.Middleware,
 	metricsNamespace string,
-	logxy LogxyInterface,
+	logxy Logxy,
 ) (base.Middleware, error) {
 	var cacheMiddleware base.Middleware
 	if cfg.CacheInstantMetricResults {
@@ -980,7 +980,7 @@ func NewInstantMetricTripperware(
 			)
 		}
 
-		if logxy.IsActive() {
+		if logxy.Enabled() {
 			queryRangeMiddleware = append(queryRangeMiddleware,
 				logxy.ShardingMiddleware(
 					log,

@@ -10,12 +10,12 @@ import (
 
 // shardResolver is a fake implementation of logql.ShardResolver
 type shardResolver struct {
-	shards   logql.Shards
+	shards   []logql.ShardWithChunkRefs
 	maxBytes uint64
 }
 
 // NewShardResolver returns a new instance of logql.ShardResolver
-func NewShardResolver(shards logql.Shards, maxBytes uint64) logql.ShardResolver {
+func NewShardResolver(shards []logql.ShardWithChunkRefs, maxBytes uint64) logql.ShardResolver {
 	return shardResolver{
 		shards:   shards,
 		maxBytes: maxBytes,
@@ -41,6 +41,6 @@ func (r shardResolver) Shards(syntax.Expr) (int, uint64, error) {
 }
 
 // ShardingRanges never should be called.
-func (r shardResolver) ShardingRanges(syntax.Expr, uint64) ([]logproto.Shard, error) {
-	return []logproto.Shard{}, errors.New("logxy ShardingRanges should not be called")
+func (r shardResolver) ShardingRanges(syntax.Expr, uint64) ([]logproto.Shard, []logproto.ChunkRefGroup, error) {
+	return []logproto.Shard{}, []logproto.ChunkRefGroup{}, errors.New("logxy ShardingRanges should not be called")
 }

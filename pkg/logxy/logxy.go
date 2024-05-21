@@ -4,39 +4,38 @@ import (
 	"github.com/go-kit/log"
 
 	"github.com/grafana/loki/v3/pkg/logql"
-	"github.com/grafana/loki/v3/pkg/querier"
 	"github.com/grafana/loki/v3/pkg/querier/queryrange"
 	"github.com/grafana/loki/v3/pkg/querier/queryrange/queryrangebase"
 )
 
-// Logxy is a LogxyInterface implementation.
-type Logxy struct {
-	// Active indicates whether the Logxy is active.
-	Active bool
-	// Cfg is the Logxy configuration.
-	Cfg queryrange.LogxyConfig
+// logxy is a queryrange.Logxy implementation.
+type logxy struct {
+	// enabled indicates whether the logxy is enabled.
+	enabled bool
+	// config is the logxy configuration.
+	config queryrange.LogxyConfig
 }
 
-// New creates a new Logxy instance.
-func New(cfg queryrange.LogxyConfig) Logxy {
-	return Logxy{
-		Active: true,
-		Cfg:    cfg,
+// New creates a new queryrange.Logxy instance.
+func New(config queryrange.LogxyConfig) queryrange.Logxy {
+	return logxy{
+		enabled: true,
+		config:  config,
 	}
 }
 
-// IsActive returns whether the Logxy is active.
-func (l Logxy) IsActive() bool {
-	return l.Active
+// Enabled returns whether the logxy is enabled.
+func (l logxy) Enabled() bool {
+	return l.enabled
 }
 
-// Config returns the Logxy configuration.
-func (l Logxy) Config() queryrange.LogxyConfig {
-	return l.Cfg
+// Config returns the logxy configuration.
+func (l logxy) Config() queryrange.LogxyConfig {
+	return l.config
 }
 
 // ShardingMiddleware returns a middleware that shards queries across multiple queriers.
-func (l Logxy) ShardingMiddleware(
+func (l logxy) ShardingMiddleware(
 	logger log.Logger,
 	confs queryrange.ShardingConfigs,
 	engineOpts logql.EngineOpts,
@@ -59,12 +58,4 @@ func (l Logxy) ShardingMiddleware(
 		shardAggregation,
 		l,
 	)
-}
-
-func (l Logxy) SplitMiddleware() queryrangebase.Middleware {
-	return NewLogxySplitterMiddleware(l)
-}
-
-func (l Logxy) LogxyQuerierAPI() *querier.QuerierAPI {
-	return nil
 }

@@ -71,7 +71,7 @@ func (l limits) QuerySplitDuration(user string) time.Duration {
 
 func (l limits) InstantMetricQuerySplitDuration(user string) time.Duration {
 	// NOTE: It returns `splitDuration` for both instant and range queries.
-	// no need to have separate limits for now.
+	// no need to have separate Limits for now.
 	if l.splitDuration == nil {
 		return l.Limits.QuerySplitDuration(user)
 	}
@@ -340,10 +340,7 @@ func (q *querySizeLimiter) guessLimitName() string {
 }
 
 func (q *querySizeLimiter) Do(ctx context.Context, r queryrangebase.Request) (queryrangebase.Response, error) {
-	span, ctx := opentracing.StartSpanFromContext(ctx, "query_size_limits")
-	defer span.Finish()
 	log := spanlogger.FromContext(ctx)
-	defer log.Finish()
 
 	// Only support TSDB
 	schemaCfg, err := q.getSchemaCfg(r)

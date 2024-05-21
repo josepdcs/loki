@@ -9,9 +9,13 @@ import (
 	"github.com/grafana/loki/v3/pkg/querier/queryrange/queryrangebase"
 )
 
-type LogxyInterface interface {
-	IsActive() bool
+// Logxy is the interface that wraps the methods required to implement the logxy middleware
+type Logxy interface {
+	// Enabled returns whether the logxy is enabled.
+	Enabled() bool
+	// Config returns the logxy configuration.
 	Config() LogxyConfig
+	// ShardingMiddleware returns a middleware that shards queries across multiple queriers.
 	ShardingMiddleware(
 		logger log.Logger,
 		confs ShardingConfigs,
@@ -23,24 +27,30 @@ type LogxyInterface interface {
 		statsHandler queryrangebase.Handler,
 		shardAggregation []string,
 	) queryrangebase.Middleware
-	SplitMiddleware() queryrangebase.Middleware
 }
 
-func EmptyLogxy() LogxyInterface {
+// EmptyLogxy returns an inactive logxy.
+func EmptyLogxy() Logxy {
 	return inactiveLogxy{}
 }
 
+// inactiveLogxy is a Logxy implementation that is not enabled.
 type inactiveLogxy struct {
 }
 
-func (l inactiveLogxy) IsActive() bool {
+// Enabled returns whether the logxy is enabled.
+// This implementation always returns false.
+func (l inactiveLogxy) Enabled() bool {
 	return false
 }
 
+// Config returns the logxy configuration.
+// This implementation always returns an empty config.
 func (l inactiveLogxy) Config() LogxyConfig {
-	return EmptyLogxyConfig()
+	return LogxyConfig{}
 }
 
+// ShardingMiddleware returns a middleware that shards queries across multiple queriers.
 func (l inactiveLogxy) ShardingMiddleware(
 	log.Logger,
 	ShardingConfigs,
@@ -55,16 +65,20 @@ func (l inactiveLogxy) ShardingMiddleware(
 	return queryrangebase.PassthroughMiddleware
 }
 
+// SplitMiddleware returns a middleware that splits queries across multiple queriers.
 func (l inactiveLogxy) SplitMiddleware() queryrangebase.Middleware {
 	return queryrangebase.PassthroughMiddleware
 }
 
+// DownstreamServer represents a downstream server that logxy can query
 type DownstreamServer struct {
-	Name     string           `yaml:"name"`
-	Url      string           `yaml:"url"`
-	MaxBytes flagext.ByteSize `yaml:"max_bytes"`
+	Name      string           `yaml:"name"`
+	Url       string           `yaml:"url"`
+	MaxBytes  flagext.ByteSize `yaml:"max_bytes"`
+	IsDefault bool             `yaml:"is_default"`
 }
 
+// RegisterFlags registers flags for the downstream server
 func (*DownstreamServer) RegisterFlags(*flag.FlagSet) {
 	// no flags to register
 }
@@ -75,10 +89,12 @@ func (*DownstreamServer) Validate() error {
 	return nil
 }
 
+// LogxyConfig is the configuration for the logxy middleware
 type LogxyConfig struct {
 	DownstreamServers []DownstreamServer `yaml:"downstream_servers"`
 }
 
+// RegisterFlags registers flags for the logxy config
 func (*LogxyConfig) RegisterFlags(*flag.FlagSet) {
 	// no flags to register
 }
@@ -89,6 +105,17 @@ func (*LogxyConfig) Validate() error {
 	return nil
 }
 
-func EmptyLogxyConfig() LogxyConfig {
-	return LogxyConfig{}
+// HasDefaultDownstreamServer returns whether the logxy config has a default downstream server
+func (l *LogxyConfig) HasDefaultDownstreamServer() bool {
+	return l.GetDefaultDownstreamServer() != nil
+}
+
+// GetDefaultDownstreamServer returns the default downstream server
+func (l *LogxyConfig) GetDefaultDownstreamServer() *DownstreamServer {
+	for _, ds := range l.DownstreamServers {
+		if ds.IsDefault {
+			return &ds
+		}
+	}
+	return nil
 }

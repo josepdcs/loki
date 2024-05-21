@@ -194,7 +194,7 @@ func TestResponseToResult(t *testing.T) {
 func TestDownstreamHandler(t *testing.T) {
 	// Pretty poor test, but this is just a passthrough struct, so ensure we create locks
 	// and can consume them
-	h := DownstreamHandler{limits: fakeLimits{}, next: nil}
+	h := DownstreamHandler{Limits: fakeLimits{}, Next: nil}
 	in := h.Downstreamer(context.Background()).(*instance)
 	require.Equal(t, DefaultDownstreamConcurrency, in.parallelism)
 	require.NotNil(t, in.locks)
@@ -221,8 +221,8 @@ func ensureParallelism(t *testing.T, in *instance, n int) {
 func TestInstanceFor(t *testing.T) {
 	mkIn := func() *instance {
 		return DownstreamHandler{
-			limits: fakeLimits{},
-			next:   nil,
+			Limits: fakeLimits{},
+			Next:   nil,
 		}.Downstreamer(context.Background()).(*instance)
 	}
 	in := mkIn()
@@ -235,6 +235,7 @@ func TestInstanceFor(t *testing.T) {
 			0,
 			logproto.BACKWARD,
 			1000,
+			nil,
 			nil,
 		)
 		require.NoError(t, err)
@@ -340,6 +341,7 @@ func TestInstanceDownstream(t *testing.T) {
 			logproto.BACKWARD,
 			1000,
 			nil,
+			nil,
 		)
 		require.NoError(t, err)
 		expr, err := syntax.ParseExpr(`{foo="bar"}`)
@@ -389,8 +391,8 @@ func TestInstanceDownstream(t *testing.T) {
 		require.Nil(t, err)
 
 		results, err := DownstreamHandler{
-			limits: fakeLimits{},
-			next:   handler,
+			Limits: fakeLimits{},
+			Next:   handler,
 		}.Downstreamer(context.Background()).Downstream(context.Background(), queries, logql.NewBufferedAccumulator(len(queries)))
 
 		fmt.Println("want", want.GetEnd(), want.GetStart(), "got", got.GetEnd(), got.GetStart())
@@ -411,6 +413,7 @@ func TestInstanceDownstream(t *testing.T) {
 			0,
 			logproto.BACKWARD,
 			1000,
+			nil,
 			nil,
 		)
 		require.NoError(t, err)
@@ -454,8 +457,8 @@ func TestInstanceDownstream(t *testing.T) {
 		require.NoError(t, err)
 
 		results, err := DownstreamHandler{
-			limits:     fakeLimits{},
-			next:       handler,
+			Limits:     fakeLimits{},
+			Next:       handler,
 			splitAlign: true,
 		}.Downstreamer(context.Background()).Downstream(context.Background(), queries, logql.NewBufferedAccumulator(len(queries)))
 
@@ -471,8 +474,8 @@ func TestInstanceDownstream(t *testing.T) {
 func TestCancelWhileWaitingResponse(t *testing.T) {
 	mkIn := func() *instance {
 		return DownstreamHandler{
-			limits: fakeLimits{},
-			next:   nil,
+			Limits: fakeLimits{},
+			Next:   nil,
 		}.Downstreamer(context.Background()).(*instance)
 	}
 	in := mkIn()
@@ -508,8 +511,8 @@ func TestDownstreamerUsesCorrectParallelism(t *testing.T) {
 	ctx := user.InjectOrgID(context.Background(), "fake")
 	l := fakeLimits{maxQueryParallelism: 4}
 	d := DownstreamHandler{
-		limits: l,
-		next:   nil,
+		Limits: l,
+		Next:   nil,
 	}.Downstreamer(ctx)
 
 	i := d.(*instance)

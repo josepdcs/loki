@@ -25,11 +25,11 @@ func NewShardingStrategy(logxyConfig queryrange.LogxyConfig) logql.ShardingStrat
 
 // Shards returns the fixed shards according to the logxy configuration.
 // We have a shard per downstream server.
-func (s shardingStrategy) Shards(syntax.Expr) (logql.Shards, uint64, error) {
+func (s shardingStrategy) Shards(syntax.Expr) ([]logql.ShardWithChunkRefs, uint64, error) {
 	var maxBytes flagext.ByteSize
-	shards := make(logql.Shards, 0, len(s.logxyConfig.DownstreamServers))
+	shards := make([]logql.ShardWithChunkRefs, 0, len(s.logxyConfig.DownstreamServers))
 	for _, d := range s.logxyConfig.DownstreamServers {
-		shards = append(shards, logql.Shard{LogxyShard: newLogxyShard(d.Name, d.Url)})
+		shards = append(shards, logql.ShardWithChunkRefs{Shard: newLogxyShard(d.Name, d.Url)})
 		if d.MaxBytes == 0 {
 			d.MaxBytes = defaultMaxBytesPerDownstreamServer
 		}
@@ -46,10 +46,12 @@ func (s shardingStrategy) Resolver() logql.ShardResolver {
 }
 
 // newLogxyShard returns a new logxy shard.
-func newLogxyShard(name, url string) *logql.LogxyShard {
-	return &logql.LogxyShard{
-		Version: logql.LogxySharingV1,
-		Url:     url,
-		Name:    name,
+func newLogxyShard(name, url string) logql.Shard {
+	return logql.Shard{
+		LogxyShard: &logql.LogxyShard{
+			Version: logql.LogxySharingV1,
+			Url:     url,
+			Name:    name,
+		},
 	}
 }
